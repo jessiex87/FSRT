@@ -130,6 +130,39 @@ function whileincond() {
   return a;  // bb2
 }
 
+function earlyret() {
+  let a = 0; 
+  if (a > 5) {  // bb0
+    a = 1;
+    return a;  // bb1
+  }
+  return a;  // bb2
+}
+
+// function earlyretloop() {
+//   let a = 0;
+//   let i = 0;
+//   while (i < 10) {
+//     if (i > 5) {
+//       return 1;
+//     }
+//     i = i + 1;
+//   }
+// }
+
+function loopbreak() {
+  let a = 0;
+  let i = 0;  // bb0
+  while (i < 10) {  // bb1
+    if (i > 5) {  // bb3
+      a = 1;  // bb4
+      break;
+    }
+    i = i + 1;  // bb5
+  }
+  return a;  // bb2
+}
+
 // ignore below for now
 // function nestedforloop() {
 //   let a = 0;  // bb0
@@ -141,4 +174,3 @@ function whileincond() {
 //   }
 //   return a;  // bb2
 // }
-
