@@ -141,8 +141,7 @@ pub struct Body {
     ident_to_local: FxHashMap<Id, VarId>,
     pub def_id_to_vars: FxHashMap<DefId, VarId>,
     pub class_instantiations: HashMap<DefId, DefId>,
-    predecessors: OnceCell<TiVec<BasicBlockId, SmallVec<[BasicBlockId; 2]>>>,  // OnceCell method auto initializes the value first time it's used
-    // dominator_tree: OnceCell<Vec<BasicBlockId>>,
+    predecessors: OnceCell<TiVec<BasicBlockId, SmallVec<[BasicBlockId; 2]>>>,
     pub dominator_tree: OnceCell<DomTree>,
 }
 
@@ -238,7 +237,8 @@ create_newtype! {
 
 #[derive(Clone, Debug, Hash, Default)]
 pub struct DomTree {
-    pub idom: Vec<i32>,  // maybe change to BasicBlockId later
+    pub idom: Vec<i32>, // maybe change to BasicBlockId later
+    pub frontiers: Vec<Vec<BasicBlockId>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -293,14 +293,15 @@ impl BasicBlock {
 }
 
 #[derive(Clone, Debug, Copy)]
-struct Arc {  // represents an edge
+struct Arc {
+    // represents an edge
     v: u32, // destination vertex of an arc/edge; the u32 represents BasicBlockId
-    next: Option<usize>  // index of the next arc in the list of arcs; None if this is the last arc
-                         // TODO: should v be a BasicBlockId or a usize? or u32
+    next: Option<usize>, // index of the next arc in the list of arcs; None if this is the last arc
+            // TODO: should v be a BasicBlockId or a usize? or u32
 }
 
-const N: usize = 100000;  // max number of nodes/bbs
-const M: usize = 500000;  // max number of edges
+const N: usize = 100000; // max number of nodes/bbs
+const M: usize = 500000; // max number of edges
 
 impl Body {
     #[inline]
@@ -416,10 +417,10 @@ impl Body {
         })
     }
 
-
     // for building up the incoming/outgoing vectors
     // returns a vector in format of: [(from, to), ...]
-    fn build_cfg_vec(&self) -> Vec<(u32, u32)> {  // the u32's represent BasicBlockIds
+    fn build_cfg_vec(&self) -> Vec<(u32, u32)> {
+        // the u32's represent BasicBlockIds
         let mut edges = vec![];
         for (bb_id, block) in self.iter_blocks_enumerated() {
             match block.successors() {
@@ -437,8 +438,8 @@ impl Body {
     // using semi-nca algo from https://maskray.me/blog/2020-12-11-dominator-tree
     fn build_dom_tree(&self, cfg: &Vec<(u32, u32)>) -> Vec<i32> {
         // declare vars
-        let mut outgoing = vec![None; N];  // e
-        let mut incoming = vec![None; N];  // ee
+        let mut outgoing = vec![None; N]; // e
+        let mut incoming = vec![None; N]; // ee
 
         let mut pool: Vec<Arc> = Vec::new();
 
@@ -446,25 +447,39 @@ impl Body {
         // u->v :: from->to
         for &(u, v) in cfg {
             // add edge 'u->v' to u's outgoing edges
-            pool.push(Arc { v: v, next: outgoing[u as usize] });
+            pool.push(Arc {
+                v,
+                next: outgoing[u as usize],
+            });
             outgoing[u as usize] = Some(pool.len() - 1);
 
             // add edge 'u->v' to v's incoming edges
-            pool.push(Arc { v: u, next: incoming[v as usize] });
+            pool.push(Arc {
+                v: u,
+                next: incoming[v as usize],
+            });
             incoming[v as usize] = Some(pool.len() - 1);
         }
-        
+
         // semi-nca algo
         let mut tick = 0;
         let mut dfn: Vec<i32> = vec![-1; N];
         let mut rdfn = vec![0; N];
         let mut uf = vec![0; N];
         let mut sdom = vec![0; N];
-        let mut best:Vec<i32> = vec![0; N];
+        let mut best: Vec<i32> = vec![0; N];
         let mut idom = vec![-1; N];
 
         // call dfs
-        self.dfs(0, &mut tick, &mut dfn, &mut rdfn, &mut uf, &mut outgoing, &mut pool);
+        Self::dfs(
+            0,
+            &mut tick,
+            &mut dfn,
+            &mut rdfn,
+            &mut uf,
+            &mut outgoing,
+            &pool,
+        );
 
         // iota equivalent
         for (i, value) in best.iter_mut().enumerate() {
@@ -472,16 +487,15 @@ impl Body {
         }
 
         for i in (1..tick).rev() {
-            let v = rdfn[i as usize];  // values of rdfn match up with the indicies
+            let v = rdfn[i as usize]; // values of rdfn match up with the indicies
             let mut u;
-            sdom[v as usize] = v;  // essentially sdom values match rdfn values (?)
+            sdom[v as usize] = v; // essentially sdom values match rdfn values (?)
 
             let mut a = incoming[v as usize];
             while let Some(_arc_index) = a {
-                // let arc = &pool[arc_index];
                 u = pool[a.unwrap()].v;
                 if dfn[u as usize] != -1 {
-                    self.eval(u.try_into().unwrap(), i as i32, &dfn, &mut best, &mut uf);
+                    Self::eval(u.try_into().unwrap(), i as i32, &dfn, &mut best, &mut uf);
                     if dfn[best[u as usize] as usize] < dfn[sdom[v as usize] as usize] {
                         sdom[v as usize] = best[u as usize];
                     }
@@ -503,8 +517,15 @@ impl Body {
     }
 
     // dfs; helper for semi-nca algo in build_dom_tree()
-    fn dfs(&self, u: usize, tick: &mut u32, dfn: &mut Vec<i32>, rdfn: &mut Vec<i32>,
-           uf: &mut Vec<i32>, outgoing: &mut Vec<Option<usize>>, pool: &Vec<Arc>) {
+    fn dfs(
+        u: usize,
+        tick: &mut u32,
+        dfn: &mut Vec<i32>,
+        rdfn: &mut Vec<i32>,
+        uf: &mut Vec<i32>,
+        outgoing: &mut Vec<Option<usize>>,
+        pool: &Vec<Arc>,
+    ) {
         dfn[u] = *tick as i32;
         rdfn[*tick as usize] = u as i32;
         *tick += 1;
@@ -515,20 +536,20 @@ impl Body {
             let v = arc.v;
             if dfn[v as usize] < 0 {
                 uf[v as usize] = u as i32;
-                self.dfs(v as usize, tick, dfn, rdfn, uf, outgoing, pool);
+                Self::dfs(v as usize, tick, dfn, rdfn, uf, outgoing, pool);
             }
             a = arc.next;
         }
     }
 
     // eval; helper for semi-nca algo in build_dom_tree()
-    fn eval(&self, v: usize, cur: i32, dfn: &Vec<i32>, best: &mut Vec<i32>, uf: &mut Vec<i32>) -> i32 {
+    fn eval(v: usize, cur: i32, dfn: &Vec<i32>, best: &mut Vec<i32>, uf: &mut Vec<i32>) -> i32 {
         if dfn[v] <= cur {
             return v.try_into().unwrap();
         }
         let u = uf[v];
-        let r = self.eval(u.try_into().unwrap(), cur, dfn, best, uf);
-        if dfn[best[u as usize] as usize] < dfn[best[v as usize] as usize] {
+        let r = Self::eval(u.try_into().unwrap(), cur, dfn, best, uf);
+        if dfn[best[u as usize] as usize] < dfn[best[v] as usize] {
             best[v] = best[u as usize];
         }
         uf[v] = r;
@@ -553,10 +574,18 @@ impl Body {
         }
         false
     }
-    
+
     // returns an iterator over the dominance frontier of a basic block
-    pub(crate) fn dominance_frontier(&self, b: BasicBlockId) -> impl Iterator<Item = BasicBlockId> + '_ {
-        let idom = &self.dominator_tree().idom;
+    pub(crate) fn dominance_frontier(
+        &self,
+        b: BasicBlockId,
+    ) -> impl Iterator<Item = BasicBlockId> + '_ {
+        let dom_tree = self.dominator_tree();
+        let ret_frontier = dom_tree.frontiers[b.0 as usize].clone();
+        ret_frontier.into_iter()
+    }
+
+    fn build_dom_frontier(&self, idom: &[i32]) -> Vec<Vec<BasicBlockId>> {
         let mut frontiers: Vec<Vec<BasicBlockId>> = Vec::new();
         for _ in 0..self.blocks.len() {
             frontiers.push(Vec::new());
@@ -575,16 +604,18 @@ impl Body {
                 }
             }
         }
-        let ret_frontier = frontiers[b.0 as usize].clone();
-        ret_frontier.into_iter()
-
+        frontiers
     }
 
     pub(crate) fn dominator_tree(&self) -> &DomTree {
         self.dominator_tree.get_or_init(|| {
             let cfg = self.build_cfg_vec();
             let dom_tree = self.build_dom_tree(&cfg);
-            DomTree { idom: dom_tree }
+            let dom_frontier = self.build_dom_frontier(&dom_tree);
+            DomTree {
+                idom: dom_tree,
+                frontiers: dom_frontier,
+            }
         })
     }
 
@@ -594,7 +625,7 @@ impl Body {
             for (bb, block) in self.iter_blocks_enumerated() {
                 match block.successors() {
                     Successors::Return => {}
-                    Successors::One(s) => preds[s].push(bb),  // pushes self's block on the predecessor list of the successor block
+                    Successors::One(s) => preds[s].push(bb), // pushes self's block on the predecessor list of the successor block
                     Successors::Two(s1, s2) => {
                         preds[s1].push(bb);
                         preds[s2].push(bb);

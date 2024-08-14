@@ -46,14 +46,7 @@ impl Environment {
         if let Err(e) = dump_dom_tree(output, self, body_map) {
             tracing::error!("Error dumping IR: {e}");
         }
-
-    
-            
     }
-
-   
-
-
 }
 
 pub fn dump_ir(output: &mut dyn Write, env: &Environment, body: &Body) -> io::Result<()> {
@@ -87,17 +80,20 @@ pub fn dump_ir(output: &mut dyn Write, env: &Environment, body: &Body) -> io::Re
 }
 
 pub fn dump_dom_tree(output: &mut dyn Write, _env: &Environment, body: &Body) -> io::Result<()> {
-
     writeln!(output, "----------------------------------------------")?;
     writeln!(output, "Checking Control Flow Graph\n")?;
 
     for (a, b) in body.iter_cfg_enumerated() {
-        write!(output, "Edge: ({a}, {b})\n")?;
+        writeln!(output, "Edge: ({a}, {b})")?;
     }
 
     writeln!(output, "----------------------------------------------")?;
     let num_blocks = body.blocks.len();
-    write!(output, "Dominator Tree idom: {:?}\n", &body.dominator_tree().idom[..num_blocks])?;
+    writeln!(
+        output,
+        "Dominator Tree idom: {:?}",
+        &body.dominator_tree().idom[..num_blocks]
+    )?;
 
     writeln!(output, "Idoms in format of <bb: bb's idom>")?;
     for (block, idom) in body.dominator_tree().idom[..num_blocks].iter().enumerate() {
@@ -137,6 +133,6 @@ pub fn dump_dom_tree(output: &mut dyn Write, _env: &Environment, body: &Body) ->
         }
         writeln!(output)?;
     }
-    
+
     Ok(())
 }
