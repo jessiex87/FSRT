@@ -237,7 +237,7 @@ create_newtype! {
 
 #[derive(Clone, Debug, Hash, Default)]
 pub struct DomTree {
-    pub idom: Vec<i32>, // maybe change to BasicBlockId later
+    pub idom: Vec<i32>, // TODO: might be better design to make into Vec<BasicBlockId> later
     pub frontiers: Vec<Vec<BasicBlockId>>,
 }
 
@@ -292,16 +292,18 @@ impl BasicBlock {
     }
 }
 
+// Represents an arc (directed edge) in the control flow graph (CFG) of a function, where:
+// - v   : the destination vertex of the arc; u32 represents a BasicBlockId.
+// - next: the index of the next arc for the source node we're on in the pool vector - see build_dom_tree() below;
+//         value is `None` if this is the last arc.
 #[derive(Clone, Debug, Copy)]
 struct Arc {
-    // represents an edge
-    v: u32, // destination vertex of an arc/edge; the u32 represents BasicBlockId
-    next: Option<usize>, // index of the next arc in the list of arcs; None if this is the last arc
-            // TODO: should v be a BasicBlockId or a usize? or u32
+    v: u32,
+    next: Option<usize>,
 }
 
-const N: usize = 100000; // max number of nodes/bbs
-const M: usize = 500000; // max number of edges
+const N: usize = 100000;
+const M: usize = 500000;
 
 impl Body {
     #[inline]
@@ -417,10 +419,10 @@ impl Body {
         })
     }
 
-    // for building up the incoming/outgoing vectors
-    // returns a vector in format of: [(from, to), ...]
+    // Builds up a CFG of a Body, where nodes are BasicBlocks.
+    // Returns the CFG as a vector in format of: [(a, b), ...],
+    //      where `a` is the source node and `b` the destination node of an arc.
     fn build_cfg_vec(&self) -> Vec<(u32, u32)> {
-        // the u32's represent BasicBlockIds
         let mut edges = vec![];
         for (bb_id, block) in self.iter_blocks_enumerated() {
             match block.successors() {
@@ -435,25 +437,26 @@ impl Body {
         edges
     }
 
-    // using semi-nca algo from https://maskray.me/blog/2020-12-11-dominator-tree
+    // Builds the dominator tree of a Body, given its CFG.
+    // Returns the dominator tree through idom, Vec<i32>, which stores the immediate dominator of each node.
+    //
+    // The algorithm used below is based on the semi-NCA algorithm described in
+    // https://maskray.me/blog/2020-12-11-dominator-tree (MaskRay), with some modifications.
     fn build_dom_tree(&self, cfg: &Vec<(u32, u32)>) -> Vec<i32> {
-        // declare vars
-        let mut outgoing = vec![None; N]; // e
-        let mut incoming = vec![None; N]; // ee
+        let mut outgoing = vec![None; N];
+        let mut incoming = vec![None; N];
 
         let mut pool: Vec<Arc> = Vec::new();
 
-        // build graph; main() fn from the algo
-        // u->v :: from->to
+        // Builds `pool`, where all the arcs of the CFG is stored
+        // Corresponds to main() fn from Maskray
         for &(u, v) in cfg {
-            // add edge 'u->v' to u's outgoing edges
             pool.push(Arc {
                 v,
                 next: outgoing[u as usize],
             });
             outgoing[u as usize] = Some(pool.len() - 1);
 
-            // add edge 'u->v' to v's incoming edges
             pool.push(Arc {
                 v: u,
                 next: incoming[v as usize],
@@ -461,7 +464,7 @@ impl Body {
             incoming[v as usize] = Some(pool.len() - 1);
         }
 
-        // semi-nca algo
+        // Corresponds to semiNca() from Maskray
         let mut tick = 0;
         let mut dfn: Vec<i32> = vec![-1; N];
         let mut rdfn = vec![0; N];
@@ -470,7 +473,6 @@ impl Body {
         let mut best: Vec<i32> = vec![0; N];
         let mut idom = vec![-1; N];
 
-        // call dfs
         Self::dfs(
             0,
             &mut tick,
@@ -481,15 +483,14 @@ impl Body {
             &pool,
         );
 
-        // iota equivalent
         for (i, value) in best.iter_mut().enumerate() {
             *value = i as i32;
         }
 
         for i in (1..tick).rev() {
-            let v = rdfn[i as usize]; // values of rdfn match up with the indicies
+            let v = rdfn[i as usize];
             let mut u;
-            sdom[v as usize] = v; // essentially sdom values match rdfn values (?)
+            sdom[v as usize] = v;
 
             let mut a = incoming[v as usize];
             while let Some(_arc_index) = a {
@@ -516,7 +517,7 @@ impl Body {
         idom
     }
 
-    // dfs; helper for semi-nca algo in build_dom_tree()
+    // Corresponds to dfs() from Maskray
     fn dfs(
         u: usize,
         tick: &mut u32,
@@ -542,7 +543,7 @@ impl Body {
         }
     }
 
-    // eval; helper for semi-nca algo in build_dom_tree()
+    // Corresponds to eval() from Maskray
     fn eval(v: usize, cur: i32, dfn: &Vec<i32>, best: &mut Vec<i32>, uf: &mut Vec<i32>) -> i32 {
         if dfn[v] <= cur {
             return v.try_into().unwrap();
@@ -556,8 +557,7 @@ impl Body {
         r
     }
 
-    // returns true if a dominates b; false otherwise
-    // a dominates b if every path from entry -> b must go through a; [entry...a...b]
+    // Returns true if BasicBlock `a` dominates BasicBlock `b`; false otherwise
     pub(crate) fn dominates(&self, a: BasicBlockId, b: BasicBlockId) -> bool {
         let dom_tree = self.dominator_tree();
         let idom = &dom_tree.idom;
@@ -575,7 +575,7 @@ impl Body {
         false
     }
 
-    // returns an iterator over the dominance frontier of a basic block
+    // Returns an iterator over the dominance frontier (DF) of a BasicBlock
     pub(crate) fn dominance_frontier(
         &self,
         b: BasicBlockId,
@@ -585,14 +585,20 @@ impl Body {
         ret_frontier.into_iter()
     }
 
+    // Builds the DF of all BasicBlocks in a Body.
+    // Returns all frontiers in the format of Vec<Vec<BasicBlockId>>,
+    //      where each inner Vec corresponds to the DF of the BasicBlock
+    //      of the same index as in the outer Vec.
+    //      E.g., frontiers[0] is the DF of the BasicBlock w/ BasicBlockId of 0.
     fn build_dom_frontier(&self, idom: &[i32]) -> Vec<Vec<BasicBlockId>> {
         let mut frontiers: Vec<Vec<BasicBlockId>> = Vec::new();
         for _ in 0..self.blocks.len() {
             frontiers.push(Vec::new());
         }
 
-        // algorithm from https://en.wikipedia.org/wiki/Static_single-assignment_form#Computing_minimal_SSA_using_dominance_frontiers
-        // which references: https://www.cs.tufts.edu/comp/150FP/archive/keith-cooper/dom14.pdf
+        // The algorithm below is based off of
+        // https://en.wikipedia.org/wiki/Static_single-assignment_form#Computing_minimal_SSA_using_dominance_frontiers and
+        // https://www.cs.tufts.edu/comp/150FP/archive/keith-cooper/dom14.pdf.
         for (id, _) in self.iter_blocks_enumerated() {
             if self.predecessors(id).len() >= 2 {
                 for pred in self.predecessors(id) {
