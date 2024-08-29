@@ -147,7 +147,7 @@ pub struct Body {
     ident_to_local: FxHashMap<Id, VarId>,
     pub def_id_to_vars: FxHashMap<DefId, VarId>,
     pub class_instantiations: HashMap<DefId, DefId>,
-    predecessors: OnceCell<TiVec<BasicBlockId, SmallVec<[BasicBlockId; 2]>>>, // OnceCell method auto initializes the value first time it's used
+    predecessors: OnceCell<TiVec<BasicBlockId, SmallVec<[BasicBlockId; 2]>>>,
     pub dominator_tree: OnceCell<DomTree>,
     pub blockbuilders: TiVec<BasicBlockId, BasicBlockBuilder>,
 }
@@ -669,9 +669,13 @@ impl Body {
         })[block]
     }
 
+    // Moves all instructions of a given block from body.blockbuilders[bb]
+    // to body.blocks[bb], and sets its terminator.
+    //
+    // TODO: Returning the old terminator may not be necessary
     #[inline]
     pub(crate) fn set_terminator(&mut self, bb: BasicBlockId, term: Terminator) -> Terminator {
-        let builder_insts = std::mem::take(&mut self.blockbuilders[bb].insts); // TODO: double check - not sure if using mem efficiently
+        let builder_insts = std::mem::take(&mut self.blockbuilders[bb].insts);
 
         let block = BasicBlock {
             insts: builder_insts,
@@ -683,6 +687,7 @@ impl Body {
         old_block.term
     }
 
+    // Returns the terminator of a given block if it has been set, otherwise returns None.
     #[inline]
     pub(crate) fn get_terminator(&mut self, bb: BasicBlockId) -> Option<Terminator> {
         if self.blocks[bb].set_term_called {

@@ -1762,15 +1762,28 @@ impl<'cx> FunctionAnalyzer<'cx> {
         }
     }
 
+    // Lowers all statements from the given `stmts`.
+    // If a return is encounted, return early to prevent
+    //      unreachable statements that come afterwards from being lowered.
     fn lower_stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
-            self.lower_stmt(stmt); // to prevent stmts from being lowered after returns
+            self.lower_stmt(stmt);
             if let Stmt::Return(_) = stmt {
                 return;
             }
         }
     }
 
+    // Lowers a single statement by pushing corresponding instruction(s)/expression(s)
+    // onto self.body.blockbuilders[block].
+    //
+    // Corresponding instruction(s)/expression(s) are initially placed in
+    // self.body.blockbuilders[block] and transferred to self.body.blocks[block]
+    // once the block's terminator gets set.
+    //
+    // B/c of this, an empty block is pushed to self.body.blocks whenever
+    // a new block is added to self.body.blockbuilders, to ensure space is allocated
+    // on self.body.blocks for all blocks when instructions are moved.
     fn lower_stmt(&mut self, n: &Stmt) {
         match n {
             Stmt::Block(BlockStmt { stmts, .. }) => self.lower_stmts(stmts),
@@ -1793,16 +1806,19 @@ impl<'cx> FunctionAnalyzer<'cx> {
             Stmt::Labeled(LabeledStmt { label, body, .. }) => {
                 self.lower_stmt(body);
             }
+            // TODO: Lower Break and Continue
             Stmt::Break(BreakStmt { label, .. }) => {}
             Stmt::Continue(ContinueStmt { label, .. }) => {}
             Stmt::If(IfStmt {
                 test, cons, alt, ..
             }) => {
-                // adds two blocks to body; one for cons, another for cont (what comes after the if (&else if present))
+                // Adds two blocks to the body:
+                //  - cons_block: block to store insts that run if the test condition of the Stmt::If is true
+                //  - cont:       block to store insts that run after the Stmt::If
                 let [temp1, temp2] = self.body.new_blocks();
-
                 let [cons_block, cont] = self.body.new_blockbuilders();
-                // if an alt block is present (else case), add another block for it
+
+                // If an alt block (`else` case) is present, add another block to the body
                 let alt_block = if let Some(alt) = alt {
                     let temp3 = self.body.new_block();
                     let alt_block = self.body.new_blockbuilder();
@@ -1812,17 +1828,15 @@ impl<'cx> FunctionAnalyzer<'cx> {
                     if self.get_curr_terminator().is_none() {
                         self.set_curr_terminator(Terminator::Goto(cont));
                     }
+
                     self.block = old_block;
                     alt_block
                 } else {
-                    // no else case
                     cont
                 };
-                // lower the test expression
                 let cond = self.lower_expr(test, None);
-                // sets the terminator for the if statements block
                 self.set_curr_terminator(Terminator::If {
-                    cond, // if cond then goto {cons} else goto {alt}
+                    cond,
                     cons: cons_block,
                     alt: alt_block,
                 });
@@ -1888,7 +1902,6 @@ impl<'cx> FunctionAnalyzer<'cx> {
                 });
                 self.block = cont;
             }
-            // TODO: Fix For Loop Lowering
             Stmt::For(ForStmt {
                 init,
                 test,
@@ -2654,6 +2667,9 @@ impl FunctionCollector<'_> {
                     blocks_to_update.push(id);
                 }
             }
+
+            // Ensures that instructions of all blocks from body.blockbuilders
+            // are moved to body.blocks
             for id in blocks_to_update {
                 body.set_terminator(id, Terminator::Ret);
             }
