@@ -15,7 +15,7 @@ use swc_core::ecma::utils::var;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
-use swc_core::ecma::ast::{MethodKind, PrivateMethod};
+use swc_core::ecma::ast::{BinaryOp, MethodKind, PrivateMethod};
 use swc_core::{
     common::{Span, SyntaxContext, DUMMY_SP},
     ecma::{
@@ -48,7 +48,7 @@ use swc_core::{
 use tracing::{debug, field::debug, info, instrument, warn};
 use typed_index_collections::{TiSlice, TiVec};
 
-use crate::ir::VarId;
+use crate::ir::{BinOp, VarId};
 use crate::{
     ctx::ModId,
     ir::{
@@ -1708,7 +1708,6 @@ impl<'cx> FunctionAnalyzer<'cx> {
                 let cons_block = self.body.new_blockbuilder();
                 let alt_block = self.body.new_blockbuilder();
                 self.set_curr_terminator(Terminator::If {
-                    // TODO: COME BACK TO?
                     cond,
                     cons: cons_block,
                     alt: alt_block,
@@ -2013,7 +2012,10 @@ impl<'cx> FunctionAnalyzer<'cx> {
             }) => self.lower_loop(left, right, body),
             Stmt::ForOf(ForOfStmt {
                 left, right, body, ..
-            }) => self.lower_loop(left, right, body),
+            }) => {
+                
+                self.lower_loop(left, right, body);
+            }
             Stmt::Decl(decl) => match decl {
                 Decl::Class(_) => {}
                 Decl::Fn(_) => {}
@@ -2043,7 +2045,18 @@ impl<'cx> FunctionAnalyzer<'cx> {
                 //FIXME: investigate this case
             }
         }
-        self.lower_stmt(body);
+        println!("BASIC BLOCK: {:?}", self.block);
+
+        let test_temp = Box::new(Expr::Bin(BinExpr {
+            span: Default::default(),
+            op: BinaryOp::Lt,
+            left: Box::new(Expr::Ident(Ident {  span: Default::default(), sym: "counter".into(), optional: false })),
+            right: Box::new(Expr::Lit(Lit::Num(Number { span: Default::default(), value: 0.0, raw: Some("0".into()) }))),
+        }));
+        let while_equiv = Stmt::While(WhileStmt { span: Default::default(), test: test_temp, body: Box::new(body.clone()) });
+        self.lower_stmt(&while_equiv);
+        
+        // self.lower_stmt(body);
     }
 
     fn lower_var_decl(&mut self, var: &VarDecl) {
