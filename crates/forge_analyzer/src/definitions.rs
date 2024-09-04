@@ -1794,8 +1794,8 @@ impl<'cx> FunctionAnalyzer<'cx> {
         while let Some(pred) = queue.pop_front() {
             let pred_term = &self.body.block(pred).term;
             if let Terminator::If { cond, cons, alt, blocktype } = pred_term {
+                // check that pred is a loop b/c both loops and conditional stmts have Terminator::If
                 if *blocktype == IfTermStatementType::LoopStmt {
-                    // return Some(*alt);
                     return Some(pred);
                 }
             }
