@@ -1833,44 +1833,19 @@ impl<'cx> FunctionAnalyzer<'cx> {
                 self.lower_stmt(body);
             }
             Stmt::Break(BreakStmt { label, .. }) => {
-                println!("{:?}", label);
-                println!("{:?}", self.block);
-                println!("{:?}", self.body.blocks);
-                for (id, block) in self.body.blocks.iter_enumerated() {
-                    println!("{:?}, {:?}\n", id, block);
-                }
-                println!("PREDECESSOR: {:?}", self.body.predecessors(self.block));
-
                 let preds = self.body.predecessors(self.block);
 
                 let post_break_block = self.find_closest_loop(preds);
                 let post_break_block = post_break_block.unwrap();
-                println!("POST BREAK BLOCK: {:?}", post_break_block);
 
                 let term = &self.body.block(post_break_block).term;
-                println!("POST BREAK BLOCK TERM: {:?}", term);
 
                 if let Terminator::If { cond, cons, alt, blocktype } = term {
-                    // self.body.set_terminator(self.block, Terminator::Goto(*alt));
-                    println!("TERM'S ALT: {:?}", alt);
-                    // self.goto_block(*alt);
                     let alt = *alt;
-
                     self.body.set_terminator(self.block, Terminator::Goto(alt));
-                    // self.set_curr_terminator(Terminator::Goto(alt));
-                    // self.goto_block(alt);
-                    // self.lower_stmt(body);
-                    
-                    println!("CURR BLOCK {:?}'s TERM: {:?}", self.block, self.body.block(self.block).term);
-                    println!("BLOCKS AFTER GOTO IN STMT::BREAK: \n{:?}", self.body.blocks);
                 }
 
-                // self.goto ---
-
                 // other cases to handle: break inside a switch statement
-                
-
-                // self.body.set_terminator(self.block, Terminator::Goto(FILL-IN));
             }
             Stmt::Continue(ContinueStmt { label, .. }) => {}
             Stmt::If(IfStmt {
