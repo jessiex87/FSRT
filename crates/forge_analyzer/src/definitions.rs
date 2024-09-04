@@ -1922,19 +1922,10 @@ impl<'cx> FunctionAnalyzer<'cx> {
                     alt: cont,
                     blocktype: IfTermStatementType::LoopStmt,
                 });
-                println!("BLOCKNOW1 {:?}", self.block);
                 let check = mem::replace(&mut self.block, body_id);
                 self.lower_stmt(body);
 
-                println!("BLOCKNOW2 {:?}", self.block);
-                // if !body.is_return_stmt() {
-                //     println!("ENTERED2, BODY: {:?}", body);
-                //     self.set_curr_terminator(Terminator::Goto(check));  // error here? should only goto(check) if there's no break
-                // } else {
-                //     self.set_curr_terminator(Terminator::Ret);
-                //     println!("ENTERED");
-                // }
-                self.set_curr_terminator(Terminator::Goto(check));  // error here? should only goto(check) if there's no break
+                self.set_curr_terminator(Terminator::Goto(check));
                 self.block = cont;
             }
             Stmt::DoWhile(DoWhileStmt { test, body, .. }) => {
